@@ -1,0 +1,80 @@
+{
+  "name": "opencode-agent-chat",
+  "version": "0.2.0",
+  "description": "A multi-agent chat bus and TUI for OpenCode: rooms, wake/post/say, cross-project bindings, search and file-first history.",
+  "type": "module",
+  "license": "MIT",
+  "author": "No-time-to-sleep",
+  "homepage": "https://github.com/No-time-to-sleep/opencode-agent-chat#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/No-time-to-sleep/opencode-agent-chat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/No-time-to-sleep/opencode-agent-chat/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "ai-agents",
+    "multi-agent",
+    "agent-chat",
+    "tui",
+    "solidjs"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "agent-chat": "./src/cli.mjs",
+    "opencode-agent-chat": "./src/cli.mjs"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./tui": "./src/tui.tsx"
+  },
+  "files": [
+    "src",
+    "examples",
+    "README.md",
+    "README.ru.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "node --check src/cli.mjs && tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": ">=2.0.14 <3",
+    "@opentui/core": ">=0.5.10 <0.9",
+    "@opentui/solid": ">=0.5.10 <0.9",
+    "solid-js": ">=1.9.0 <2"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    },
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.0.14",
+    "@opencode/theme": "2.0.14",
+    "@opentui/core": "0.5.10",
+    "@opentui/solid": "0.5.10",
+    "@types/node": "^24.10.1",
+    "solid-js": "1.9.12",
+    "typescript": "^5.9.3"
+  }
+}
