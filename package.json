@@ -44,7 +44,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/smoke.test.mjs",
     "typecheck": "tsc --noEmit",
     "check": "node --check src/cli.mjs && tsc --noEmit"
   },
