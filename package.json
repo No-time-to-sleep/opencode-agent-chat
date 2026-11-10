@@ -1,6 +1,6 @@
 {
   "name": "opencode-agent-chat",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A multi-agent chat bus and TUI for OpenCode: rooms, wake/post/say, cross-project bindings, search and file-first history.",
   "type": "module",
   "license": "MIT",

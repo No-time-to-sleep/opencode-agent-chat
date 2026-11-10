@@ -18,7 +18,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 const HOME = os.homedir();
 const ROOT =
   process.env.AGENT_CHAT_HOME ||
@@ -47,19 +47,33 @@ const argv = process.argv.slice(2);
 const cmd = argv.shift() || "help";
 const opts = parseOpts(argv);
 
-main().catch((error) => {
-  console.error(`agent-chat: ${error.message || error}`);
-  process.exit(1);
-});
-
 async function main() {
+  const wantsHelp =
+    cmd === "help" ||
+    cmd === "--help" ||
+    cmd === "-h" ||
+    Boolean(opts.help);
+  if (wantsHelp) {
+    const target =
+      typeof opts.help === "string"
+        ? opts.help
+        : cmd === "help" || cmd === "--help" || cmd === "-h"
+          ? opts._[0]
+          : cmd;
+    return help(target);
+  }
+  if (
+    cmd === "version" ||
+    cmd === "--version" ||
+    cmd === "-v" ||
+    Boolean(opts.version)
+  ) {
+    return version();
+  }
+
   await ensureDirs();
 
   switch (cmd) {
-    case "help":
-    case "--help":
-    case "-h":
-      return help();
     case "rooms":
       return cmdRooms();
     case "create":
@@ -115,7 +129,7 @@ async function main() {
     case "wake-one":
       return cmdWakeOne();
     default:
-      throw new Error(`unknown command "${cmd}". Run: agent-chat help`);
+      throw new Error(`unknown command "${cmd}". Run: agent-chat --help`);
   }
 }
 
@@ -130,6 +144,14 @@ function parseOpts(input) {
     if (item === "--") {
       out._.push(...input.slice(i + 1));
       break;
+    }
+    if (item === "-h") {
+      out.help = true;
+      continue;
+    }
+    if (item === "-v") {
+      out.version = true;
+      continue;
     }
     if (item.startsWith("--")) {
       const eq = item.indexOf("=");
@@ -152,52 +174,359 @@ function parseOpts(input) {
   return out;
 }
 
-function help() {
+const COMMANDS = {
+  help: {
+    usage: "help [команда]",
+    summary: "Справка по командам.",
+    examples: ["agent-chat help", "agent-chat help post"],
+  },
+  version: {
+    usage: "version",
+    summary: "Версия agent-chat.",
+    examples: ["agent-chat version", "agent-chat --version"],
+  },
+  rooms: {
+    usage:
+      "rooms [--from <агент>] [--all] [--archived | --include-archived] [--json]",
+    summary: "Список комнат и непрочитанного.",
+    flags: [
+      "--from <агент>       считать unread для агента",
+      "--all                все проекты",
+      "--archived           только архив",
+      "--include-archived   архив вместе с активными",
+      "--json               JSON",
+    ],
+    examples: [
+      "agent-chat rooms --from programmer",
+      "agent-chat rooms --all --json",
+    ],
+  },
+  read: {
+    usage: 'read "<комната>" [--from <агент>] [--json]',
+    summary: "История комнаты.",
+    flags: [
+      "--from <агент>  отметить прочитанным для агента",
+      "--json          JSON",
+    ],
+    examples: ['agent-chat read "bug-123" --from programmer'],
+  },
+  inbox: {
+    usage: "inbox <агент> [--json]",
+    summary: "Непрочитанные заметки по всем проектам.",
+    flags: ["--json  JSON"],
+    examples: ["agent-chat inbox programmer"],
+  },
+  messages: {
+    usage: 'messages "<комната>" [-n <N>] [--from <агент>] [--json]',
+    summary: "Последние сообщения комнаты.",
+    flags: [
+      "-n <N>          сколько показать (по умолчанию 80)",
+      "--from <агент>  отметить прочитанным для агента",
+      "--json          JSON",
+    ],
+    examples: ['agent-chat messages "bug-123" -n 20'],
+  },
+  post: {
+    usage:
+      'post "<комната>" "<текст>" --from <агент> [--to a,b] [--reply-to <id>] [--file <path>] [--test <name>] [--text-file <path>]',
+    summary: "Пассивная заметка: не будит агента.",
+    flags: [
+      "--from <агент>     обязательно, кто отправил",
+      "--to a,b           получатели (по умолчанию все остальные)",
+      "--reply-to <id>    ответ на сообщение",
+      "--file <path>      ссылка на файл (можно через запятую)",
+      "--test <name>      ссылка на тест (можно через запятую)",
+      "--text-file <path> текст из UTF-8 файла",
+    ],
+    examples: [
+      'agent-chat post "bug-123" "build is green" --from tester',
+      'agent-chat post "bug-123" "see refs" --file src/app.ts --from tester',
+    ],
+  },
+  wake: {
+    usage:
+      'wake "<комната>" "<текст>" --from <агент> [--to a,b] [--timeout <сек>] [--force] [--file <path>] [--test <name>] [--text-file <path>]',
+    summary: "Разбудить выбранных агентов.",
+    flags: [
+      "--from <агент>     обязательно, кто будит",
+      "--to a,b           кому (по умолчанию все остальные)",
+      "--timeout <сек>    таймаут запуска (по умолчанию 300)",
+      "--force            обойти блокировку hop > 3",
+      "--file / --test    ссылки на файлы и тесты",
+      "--text-file <path> текст из UTF-8 файла",
+    ],
+    examples: [
+      'agent-chat wake "bug-123" "please review" --from programmer --to reviewer',
+    ],
+  },
+  say: {
+    usage:
+      'say "<комната>" "<текст>" [--to a,b | --room-only] [--timeout <сек>] [--file <path>] [--test <name>] [--text-file <path>]',
+    summary: "Сообщение от пользователя; будит.",
+    flags: [
+      "--to a,b           кому (по умолчанию все остальные)",
+      "--room-only        только записать в комнату, без пробуждения",
+      "--timeout <сек>    таймаут запуска (по умолчанию 300)",
+      "--file / --test    ссылки на файлы и тесты",
+      "--text-file <path> текст из UTF-8 файла",
+    ],
+    examples: ['agent-chat say "bug-123" "ship it" --to programmer'],
+  },
+  search: {
+    usage:
+      'search "<текст>" [--room <комната>] [--from <агент>] [--limit 30] [--include-archived] [--current] [--json]',
+    summary: "Поиск по сообщениям и ссылкам.",
+    flags: [
+      "--room <комната>     только эта комната",
+      "--from <агент>       только сообщения агента",
+      "--limit <N>          сколько результатов (по умолчанию 30)",
+      "--include-archived   искать и в архиве",
+      "--current            только текущий проект",
+      "--json               JSON",
+    ],
+    examples: ['agent-chat search "deploy" --limit 10'],
+  },
+  create: {
+    usage:
+      'create "<название>" [--description "<текст>"] [--with a,b] [--from <агент>] [--project <alias|dir>]',
+    summary: "Создать комнату.",
+    flags: [
+      "--description <текст>  описание комнаты",
+      "--with a,b             участники",
+      "--from <агент>         автор (по умолчанию user)",
+      "--project <alias|dir>  проект комнаты",
+    ],
+    examples: [
+      'agent-chat create "bug-123" --with programmer,tester --from user',
+    ],
+  },
+  update: {
+    usage:
+      'update "<комната>" [--name "<новое>"] [--description "<текст>"] [--from <агент>]',
+    summary: "Изменить название или описание комнаты.",
+    flags: [
+      "--name <текст>         новое название",
+      "--description <текст>  новое описание",
+      "--from <агент>         кто меняет (по умолчанию user)",
+    ],
+  },
+  invite: {
+    usage: 'invite "<комната>" <агент...> [--from <агент>]',
+    summary: "Пригласить участников в комнату.",
+    flags: ["--from <агент>  кто приглашает (по умолчанию user)"],
+    examples: ['agent-chat invite "bug-123" reviewer@backend --from programmer'],
+  },
+  archive: {
+    usage: 'archive "<комната>" [--from <агент>]',
+    summary: "Скрыть комнату из обычного списка.",
+    examples: ['agent-chat archive "bug-123"'],
+  },
+  unarchive: {
+    usage: 'unarchive "<комната>" [--from <агент>]',
+    summary: "Вернуть комнату из архива.",
+    examples: ['agent-chat unarchive "bug-123"'],
+  },
+  delete: {
+    usage: 'delete "<комната>" --yes',
+    summary: "Удалить комнату; история уходит в trash/.",
+    flags: ["--yes  подтверждение удаления"],
+    examples: ['agent-chat delete "bug-123" --yes'],
+  },
+  prune: {
+    usage: "prune [--days N] [--rooms] [--trash] [--dry-run]",
+    summary: "Очистить старые сообщения и архив.",
+    flags: [
+      "--days <N>  срок хранения (по умолчанию из config)",
+      "--rooms     чистить историю комнат",
+      "--trash     чистить корзину",
+      "--dry-run   показать, что будет удалено",
+    ],
+    examples: ["agent-chat prune --days 30 --dry-run"],
+  },
+  snapshot: {
+    usage: "snapshot [--all] [--include-archived] [--json]",
+    summary: "Снимок комнат для TUI.",
+    flags: [
+      "--all               все проекты",
+      "--include-archived  включить архив",
+      "--json              JSON",
+    ],
+  },
+  bind: {
+    usage:
+      "bind <агент> [--session ses_...] [--project <alias|dir>] [--yes]",
+    summary: "Привязать агента к сессии.",
+    flags: [
+      "--session <ses_...>  конкретная сессия",
+      "--project <alias|dir> проект",
+      "--yes                выбрать без вопроса",
+    ],
+    examples: ["agent-chat bind programmer --session ses_... --yes"],
+  },
+  unbind: {
+    usage:
+      "unbind <агент> [--project <alias|dir>] | unbind --stale [--all] [--json]",
+    summary: "Удалить привязку или мёртвые привязки.",
+    flags: [
+      "--project <alias|dir> проект",
+      "--stale               только мёртвые привязки",
+      "--all                 все проекты (с --stale)",
+      "--json                JSON",
+    ],
+    examples: ["agent-chat unbind --stale --all"],
+  },
+  channels: {
+    usage: "channels [--all] [--check] [--stale] [--json]",
+    summary: "Каналы и состояние сессий.",
+    flags: [
+      "--all    все проекты",
+      "--check  проверить сессии через OpenCode API",
+      "--stale  только мёртвые привязки",
+      "--json   JSON",
+    ],
+    examples: ["agent-chat channels --all --check"],
+  },
+  sessions: {
+    usage: "sessions [--project <alias|dir>] [--agent <тип>] [--limit 30] [--json]",
+    summary: "Список сессий OpenCode.",
+    flags: [
+      "--project <alias|dir> проект",
+      "--agent <тип>        фильтр по типу агента",
+      "--limit <N>          сколько показать (по умолчанию 30)",
+      "--json               JSON",
+    ],
+  },
+  projects: {
+    usage: "projects [--json]",
+    summary: "Список alias проектов.",
+    flags: ["--json  JSON"],
+  },
+  project: {
+    usage: 'project add <alias> "<dir>"',
+    summary: "Добавить alias проекта.",
+    examples: ['agent-chat project add backend "D:\\work\\backend"'],
+  },
+  config: {
+    usage:
+      "config [--retention-days N] [--archived-retention-days N] [--json]",
+    summary: "Показать или изменить retention.",
+    flags: [
+      "--retention-days <N>           срок хранения сообщений",
+      "--archived-retention-days <N>  срок хранения архива",
+      "--json                         JSON",
+    ],
+    examples: ["agent-chat config --retention-days 30"],
+  },
+  "audit-secrets": {
+    usage: "audit-secrets",
+    summary: "Найти возможные секреты в истории.",
+  },
+  status: {
+    usage: "status",
+    summary: "Состояние хранилища, сервиса и привязок.",
+  },
+};
+
+const HELP_GROUPS = [
+  {
+    title: "Основное",
+    names: ["inbox", "rooms", "read", "messages", "post", "wake", "say", "search"],
+  },
+  {
+    title: "Комнаты",
+    names: [
+      "create",
+      "update",
+      "invite",
+      "archive",
+      "unarchive",
+      "delete",
+      "prune",
+      "snapshot",
+    ],
+  },
+  {
+    title: "Привязки и проекты",
+    names: ["bind", "unbind", "channels", "sessions", "projects", "project"],
+  },
+  {
+    title: "Служебное",
+    names: ["status", "config", "audit-secrets", "help", "version"],
+  },
+];
+
+function version() {
+  console.log(`agent-chat ${VERSION}`);
+}
+
+function commandHelp(name) {
+  const item = COMMANDS[name];
+  if (!item) {
+    console.log(`Неизвестная команда "${name}".`);
+    console.log("Все команды: agent-chat --help");
+    return;
+  }
+  console.log(`agent-chat ${name} — ${item.summary}`);
+  console.log("");
+  console.log("Использование:");
+  console.log(`  agent-chat ${item.usage}`);
+  if (item.flags?.length) {
+    console.log("");
+    console.log("Опции:");
+    for (const line of item.flags) console.log(`  ${line}`);
+  }
+  if (item.examples?.length) {
+    console.log("");
+    console.log("Примеры:");
+    for (const line of item.examples) console.log(`  ${line}`);
+  }
+}
+
+function help(target) {
+  if (target) {
+    if (COMMANDS[target]) return commandHelp(target);
+    console.log(`Неизвестная команда "${target}".\n`);
+  }
+
   console.log(`agent-chat ${VERSION} — мини-мессенджер между агентами OpenCode
 
-Комнаты:
-  agent-chat rooms [--from <агент>] [--all] [--archived | --include-archived] [--json]
-  agent-chat create "<название>" [--description "текст"] [--with a,b] [--from <агент>]
-  agent-chat update "<комната>" [--name "новое"] [--description "текст"] [--from <агент>]
-  agent-chat invite "<комната>" <агент...> [--from <агент>]
-  agent-chat archive "<комната>" | unarchive "<комната>" [--from <агент>]
-  agent-chat delete "<комната>" --yes              # история уходит в trash/
-  agent-chat prune [--days N] [--rooms] [--trash] [--dry-run]
-  agent-chat search "<текст>" [--room <комната>] [--from <агент>] [--limit 30] [--include-archived] [--current]
+Использование:
+  agent-chat <команда> [опции]
+  agent-chat <команда> --help
+  agent-chat --help
 
-Сообщения:
-  agent-chat post "<комната>" "<текст>" --from <агент> [--reply-to <id>] [--file path] [--test name]
-  agent-chat wake "<комната>" "<текст>" --from <агент> [--to a,b] [--timeout 300] [--force]
-  agent-chat say  "<комната>" "<текст>" [--to a,b | --room-only] [--timeout 300] [--file path] [--test name]
-  agent-chat read "<комната>" [--from <агент>] [--json]
-  agent-chat inbox <агент> [--all] [--json]          # непрочитанные заметки
-  agent-chat messages "<комната>" [-n 50] [--json]
+Команды:`);
 
-Сессии и проекты:
-  agent-chat bind <агент> [--session ses_...] [--yes] [--project <alias|dir>]
-  agent-chat unbind <агент> [--project <alias|dir>] | unbind --stale [--all]
-  agent-chat channels [--all] [--check] [--stale]
-  agent-chat sessions [--project <alias|dir>] [--agent <тип>] [--limit 30]
-  agent-chat projects
-  agent-chat project add <alias> "<dir>"
-  agent-chat config [--retention-days N] [--archived-retention-days N]
-  agent-chat audit-secrets
-  agent-chat status
-  agent-chat snapshot [--all] [--include-archived] [--json]
+  for (const group of HELP_GROUPS) {
+    console.log("");
+    console.log(`${group.title}:`);
+    for (const name of group.names) {
+      const item = COMMANDS[name];
+      console.log(`  ${name.padEnd(15)} ${item.summary}`);
+    }
+  }
 
-Кросс-проект:
-  агент адресуется как <агент>@<alias>, например programmer@opencode.
-  agent-chat say "<комната>" "..." --to programmer@opencode
-  agent-chat invite "<комната>" tester@backend
+  console.log(`
+Общие опции:
+  --json                 JSON для read, inbox, messages, rooms, search,
+                         snapshot, channels, sessions, projects, config
+  --from <агент>         имя агента
+  --to a,b               получатели
+  --project <alias|dir>  проект
+  --text-file <путь>     текст из UTF-8 файла (post/wake/say)
+
+Примеры:
+  agent-chat inbox programmer
+  agent-chat post "bug-123" "build is green" --from tester
+  agent-chat wake "bug-123" "review please" --from programmer --to reviewer
+  agent-chat say "bug-123" "ship it" --to programmer
 
 Правила:
-  - post — пассивное уведомление, не будит и не требует ответа;
-  - wake — будит указанных агентов и запускает их;
-  - say — сообщение от пользователя, будит участников и собирает ответы;
-  - hop > ${MAX_HOPS} блокируется, чтобы агенты не переписывались бесконечно;
-  - archive скрывает комнату, delete переносит историю в trash/;
-  - секреты в сообщениях блокируются фильтром (ключи, токены, пароли);
-  - ссылки: @file:путь и @test:название, либо --file / --test.
+  - post — пассивно; wake — будит; say — от пользователя.
+  - hop > ${MAX_HOPS} блокируется.
+  - archive скрывает; delete переносит историю в trash/.
+  - секреты блокируются фильтром.
+  - ссылки: @file:путь, @test:название.
 
 Данные: ${ROOT}`);
 }
@@ -2804,3 +3133,8 @@ async function cmdInit() {
   opts._ = ["general"];
   await cmdCreate();
 }
+
+main().catch((error) => {
+  console.error(`agent-chat: ${error.message || error}`);
+  process.exit(1);
+});

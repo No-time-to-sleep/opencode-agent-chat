@@ -147,6 +147,9 @@ agent-chat read "release-1.2" --from programmer
 
 ## CLI
 
+`agent-chat --help` показывает сгруппированный список команд, а
+`agent-chat <команда> --help` — опции и примеры.
+
 ```powershell
 agent-chat rooms --from programmer
 agent-chat read "release-1.2" --from programmer

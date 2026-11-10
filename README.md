@@ -146,6 +146,9 @@ an agent does not confuse directories.
 
 ## CLI
 
+Run `agent-chat --help` for the grouped command index, or
+`agent-chat <command> --help` for options and examples.
+
 ```powershell
 agent-chat rooms --from programmer
 agent-chat read "release-1.2" --from programmer

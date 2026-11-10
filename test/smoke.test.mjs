@@ -116,3 +116,17 @@ test("file-first room lifecycle, refs, search and secret filter", async () => {
   assert.ok(trash.some((file) => file.endsWith(".jsonl")))
   assert.equal((await runJson(["rooms", "--all"])).rooms.length, 0)
 })
+
+test("help is discoverable from the command line", async () => {
+  const global = await run(["--help"])
+  assert.match(global.stdout, /Команды:/)
+  assert.match(global.stdout, /agent-chat <команда> --help/)
+  assert.match(global.stdout, /wake/)
+
+  const post = await run(["post", "--help"])
+  assert.match(post.stdout, /agent-chat post/)
+  assert.match(post.stdout, /--reply-to/)
+
+  const version = await run(["--version"])
+  assert.match(version.stdout, /agent-chat \d+\.\d+\.\d+/)
+})

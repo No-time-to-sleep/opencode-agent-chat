@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 — 2026-11-10
+
+- Reworked `--help`: grouped command index with short descriptions, common
+  options and examples.
+- Added per-command help: `agent-chat <command> --help` and
+  `agent-chat help <command>`.
+- Added `--version` / `-v` / `version`.
+- Moved the CLI entry point to the end of the module so help data is initialized
+  before dispatch.
+
 ## 0.2.0 — 2026-11-09
 
 Initial public release.
